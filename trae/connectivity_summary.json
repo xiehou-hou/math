@@ -1,0 +1,74 @@
+{
+  "steps": [
+    {
+      "action": "/enter",
+      "request": {
+        "arena_id": "default",
+        "robot_id": "202609008049"
+      },
+      "response": {
+        "accepted": true,
+        "real_timestamp_ms": 1789055747890,
+        "virtual_time_s": 0,
+        "max_virtual_duration_s": 360000,
+        "max_real_duration_s": 1200,
+        "remaining_real_duration_s": 1200
+      }
+    },
+    {
+      "action": "/measure",
+      "position": [
+        0,
+        0
+      ],
+      "channel": 1,
+      "response": {
+        "accepted": true,
+        "real_timestamp_ms": 1789055747907,
+        "virtual_time_s": 5,
+        "measure_result": "direction",
+        "svd_deg": 249.22
+      }
+    },
+    {
+      "action": "/measure",
+      "position": [
+        100,
+        0
+      ],
+      "channel": 1,
+      "response": {
+        "accepted": true,
+        "real_timestamp_ms": 1789055747939,
+        "virtual_time_s": 30,
+        "measure_result": "direction",
+        "svd_deg": 239.95
+      }
+    },
+    {
+      "action": "/clear",
+      "position": [
+        0,
+        0
+      ],
+      "channel": 1,
+      "response": {
+        "accepted": true,
+        "real_timestamp_ms": 1789055747953,
+        "virtual_time_s": 53,
+        "clear_result": "no_target_in_range"
+      }
+    },
+    {
+      "action": "/exit",
+      "response": {
+        "accepted": true,
+        "real_timestamp_ms": 1789055747966,
+        "virtual_time_s": 53,
+        "exit_reason": "user_exit"
+      }
+    }
+  ],
+  "ok": true,
+  "errors": []
+}

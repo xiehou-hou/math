@@ -1,0 +1,51 @@
+{
+  "cleared": 12,
+  "channels_with_signal": [
+    1,
+    2,
+    3,
+    5,
+    7,
+    8,
+    9,
+    10,
+    11,
+    14,
+    15,
+    16,
+    18,
+    19,
+    20
+  ],
+  "channels_cleared": [
+    1,
+    2,
+    3,
+    8,
+    9,
+    10,
+    11,
+    14,
+    15,
+    16,
+    18,
+    19
+  ],
+  "directional_channels": [
+    2,
+    18,
+    5,
+    7,
+    14,
+    16,
+    16,
+    20
+  ],
+  "a_class": 8,
+  "b_class": 2,
+  "c_class": 10,
+  "d_class": 0,
+  "actions": 310,
+  "virtual_time_s": 32230.81038,
+  "errors": []
+}

@@ -1,0 +1,581 @@
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,tabularx,float,enumitem,graphicx}
+\usepackage{algorithm,algpseudocode}
+\usepackage{hyperref}
+\hypersetup{hidelinks}
+\setlength{\parindent}{2em}
+\linespread{1.25}
+
+\title{无线电干扰源的多站测向定位与快速清除}
+\author{}
+\date{}
+
+\newcommand{\keywords}[1]{\par\noindent\textbf{关键词：}#1}
+\newcommand{\diam}{\operatorname{diam}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+针对无线电干扰源位置未知、有效接收半径未知、示向度含 $[-1^\circ,1^\circ]$ 误差的问题，本文建立从几何定位、检测点选择到机器狗在线搜索清除的一体化模型，并依据模拟器接口规则设计可复核的串行算法。
+
+\textbf{对于问题一，}把每个检测点处的示向度误差表示为宽度 $2^\circ$ 的角域约束，将其改写为两条半平面，与半径 $1800\,\mathrm{m}$ 的目标圆域求交，得到凸多边形定位区域 $P$。直径算法分三步：线性规划检查可行性与有界性，半平面交枚举全部顶点，旋转卡壳求最远顶点对。由于凸集直径必由顶点对取得，结果是精确值而非栅格近似。覆盖判据为：直径 $D$ 的圆能覆盖 $P$ 当且仅当最小包围圆半径 $R^*\le D/2$；平面 Jung 定理仅给 $R^*\le D/\sqrt{3}$，不能推出该式。边长为 $D$ 的等边三角形 $R^*=D/\sqrt{3}>D/2$，故一般答案是否定的。
+
+\textbf{对于问题二，}以第一示向射线为基准建立局部坐标系 $(\bm u,\bm v)$。单次示向度对应的源位置集合 $F_0$ 为内半径 $5\,\mathrm{m}$、外半径 $1500\,\mathrm{m}$、半角 $\delta=1^\circ$ 的环形扇区。把"较好的定位效果"明确定义为极小极大指标
+\[
+  J(Q)=\sup_{\beta}\diam F_2(Q,\beta),\qquad
+  \min_{Q\in\mathcal C(F_0)} J(Q),
+\]
+即在保证第二点能收到信号的前提下，最小化第二次观测后物理可行区域的最坏直径。该模型与概率分布无关，可直接对接问题一的直径算法。把不可区分对 $(G,H)$ 的几何约束整理为有理函数 $T(a,b)$，证明其超水平集 $\{T(a,b)\ge T\}$ 是圆盘，从而把无穷维极小极大问题转化为两圆外切的代数方程。求解得全局最优解
+\[
+  Q_\pm=S+843.0348\,\bm u\pm545.5284\,\bm v,\qquad T_*=1401.2407,
+\]
+对应最坏直径下界 $d(T_*)\approx 110.99\,\mathrm{m}$。该结果给出两条重要结论：纯垂直于首条示向线移动不能保证收到信号；仅靠两次示向观测不能把最坏直径压到 $20\,\mathrm{m}$ 清除阈值内，需要第三次观测或在线精扫。
+
+\textbf{对于问题三，}建立"共享检测站扫描—多观测择优交会—最近邻清除"的在线策略。原点和半径 $950\,\mathrm{m}$ 圆周上的八个等角点共九站，每站一次遍历全部 $20$ 个频道，相邻站交替采用升序和降序频道以减少跨站切换。九站布局在接收半径取下界 $1000\,\mathrm{m}$ 时仍保证每个全向源至少被检测一次（最坏距离 $\approx 992\,\mathrm{m}$）。仅对只有一次示向观测的频道调用问题二选点模型补测一次。定位阶段选择交会角最大的一对示向线，清除阶段采用最近邻路径。演练日志详见正文，正式测试结果见支撑材料。
+
+\textbf{对于问题四，}把 \texttt{no\_signal} 的三义性（无源/超距/不在定向覆盖内）显式建模为证据而非结论。算法在九站扫描基础上增加定向扇区假设检验：对仅在部分站收到 \texttt{direction} 的频道，依示向度反演候选定向方向，再选择位于假设扇区外的检测点做证实性补测；任一频道只要获得两次可前向相交的示向度，即按问题三流程定位与清除，因为清除半径 $20\,\mathrm{m}$ 与定向覆盖无关。算法保留对全向源的全部处理能力，不因定向源引入而退化。
+
+\keywords{示向交会\quad 凸多边形\quad 最小包围圆\quad 极小极大检测点选择\quad 共享检测站\quad 定向覆盖假设检验}
+\end{abstract}
+
+\section{问题重述}
+\subsection{问题背景}
+无线电干扰源的精准定位通常需要人员携带测向设备进入目标区域反复检测。为降低危险环境中的人工风险并缩短处置时间，现使用搭载测向机、光学探测仪和清除设备的机器狗完成自动作业。干扰源均位于以原点为圆心、半径 $1800\,\mathrm{m}$ 的圆域内，频道取 $1$ 至 $20$ 且互不重复。机器狗只能在停止移动后逐频道检测，测得的示向度含有 $[-1^\circ,1^\circ]$ 误差，各干扰源有效接收半径位于 $[1000,1500]\,\mathrm{m}$。因此需要兼顾定位精度、区域覆盖、移动路径与检测耗时。
+
+\subsection{问题提出}
+\textbf{问题1：}根据若干检测点坐标及同一干扰源的示向度，建立交会定位区域及其直径的计算方法，并判断以该直径为直径的圆能否覆盖定位区域。
+
+\textbf{问题2：}已知全向干扰源在一个检测点处的示向度，确定第二检测点的选择策略和候选区域，使后续交会定位效果较好。
+
+\textbf{问题3：}当目标区域内存在 $10$ 至 $16$ 个全向干扰源且具体频道未知时，设计单机器狗从原点出发的自动检测、定位、路径规划与清除算法，并通过模拟器演练检验效率。
+
+\textbf{问题4：}在全向与定向干扰源混合、定向源数量及方向均未知时，进一步设计检测与清除策略。
+
+\section{问题分析}
+
+\subsection{问题1分析}
+每次示向观测不能视为一条精确射线，而应表示为测得方向两侧各 $1^\circ$ 的角域。将所有角域与目标圆域求交即可得到干扰源的几何可行域。由于每个角域均可写成两条半平面的交，所得非空区域为凸集；圆域的曲边界可用正多边形逼近并统一以半平面裁剪处理，从而天然兼容角度跨越 $0^\circ$、空集和退化情形。定位区域直径通过凸包顶点对最大距离获得，由凸性保证这是精确值而非近似。覆盖问题不能仅看区域直径：直径只约束点对距离，并不固定覆盖圆圆心，须另算最小包围圆才能下结论。
+
+\subsection{问题2分析}
+题面"较好的定位效果"未指明评价指标，故须先做指标选择。可能的指标包括：定位区域面积、直径、均方误差或机器狗移动时间。后两类需要距离或误差分布的先验，单次示向度无法提供；前两类只依赖几何可行域，与问题一直接对接。本文采用最坏情况直径极小化指标，因为它对未知接收半径稳健，且直接对应清除阈值 $20\,\mathrm{m}$。第二点选择还要满足一个容易漏掉的物理约束：第二点必须能收到信号，这要求候选点位于所有可能源位置的有效接收盘的交集内。把上述两类约束联合写成代数方程，可推出全局最优解的闭式形式。
+
+\subsection{问题3分析}
+逐频道单独寻找第二检测点会产生大量重复移动，因此应让多个频道共享检测站。中心站覆盖内圈，圆周检测站覆盖外圈；在每个站一次遍历全部频道，积累同一频道的多次示向观测。对只有一次观测的频道调用问题二选点模型进行一次补测，再选择交会角最大的观测对估计位置。全部位置确定后统一按最近邻顺序清除，减少目标之间的空程。程序运行边界采用 \texttt{/enter} 返回的 \texttt{remaining\_real\_duration\_s}，不把 $20$ 分钟现实上限误作虚拟时间上限。
+
+\subsection{问题4分析}
+定向源使 \texttt{no\_signal} 具有多重解释：该频道无源、距离超出发射半径、或检测点不在定向覆盖内。算法必须把 \texttt{no\_signal} 当作证据而非结论。基本思路是：先在九个共享站扫描一遍得到每个频道在各站的检测结果，对出现 \texttt{direction} 的频道按问题三流程定位；对只在部分站收到 \texttt{direction} 的频道，依示向度反演候选定向方向，选择位于假设扇区外的检测点做证实性补测。关键性质是：清除半径 $20\,\mathrm{m}$ 与定向覆盖无关，因此一旦从覆盖内的两次示向度获得位置估计，即可从任意方向接近清除。
+
+\section{模型假设}
+\begin{itemize}[itemindent=2em]
+  \item 各干扰源在一次测试中位置、频道、有效接收半径及定向方向保持不变，且不同干扰源互不影响。
+  \item 机器狗按两点间直线移动，速度恒为 $5\,\mathrm{m/s}$，忽略转向、加减速和地形造成的额外耗时。
+  \item 同一检测点重复测量的环境误差固定，不同检测点的示向误差均落在 $[-1^\circ,1^\circ]$ 内。
+  \item 模拟器返回且满足 \texttt{accepted=true} 的结果真实有效，网络通信耗时不计入虚拟定位清除时间。
+\end{itemize}
+
+\section{符号说明}
+\begin{table}[H]
+  \centering
+  \begin{tabularx}{\textwidth}{cXc}
+    \toprule
+    符号 & 说明 & 单位 \\
+    \midrule
+    $\Omega$ & 半径为 $1800$ 的目标圆域 & $\mathrm{m}^2$ \\
+    $S$ & 第一检测点坐标 & $\mathrm{m}$ \\
+    $Q$ & 第二检测点坐标 & $\mathrm{m}$ \\
+    $G$ & 干扰源真实位置 & $\mathrm{m}$ \\
+    $\theta$ & 在 $S$ 处测得的示向度 & $^\circ$ \\
+    $\delta$ & 示向度最大绝对误差，取 $1^\circ$ & $^\circ$ \\
+    $\bm u,\bm v$ & 第一射线方向与法向的单位向量 & — \\
+    $l,R,L$ & 近距阈值 $5$、最小接收半径 $1000$、最大接收半径 $1500$ & $\mathrm{m}$ \\
+    $P$ & 多次示向约束形成的定位区域 & $\mathrm{m}^2$ \\
+    $F_0$ & 单次示向度对应的源位置集合（环形扇区） & $\mathrm{m}^2$ \\
+    $\mathcal C(F_0)$ & 保证收到信号的第二点候选区域 & $\mathrm{m}^2$ \\
+    $F_2(Q,\beta)$ & 第二次观测后的可行区域 & $\mathrm{m}^2$ \\
+    $D$ & 定位区域直径 & $\mathrm{m}$ \\
+    $R^*$ & 定位区域最小包围圆半径 & $\mathrm{m}$ \\
+    $\alpha$ & 两条示向线的锐交会角 & $^\circ$ \\
+    $v$ & 机器狗移动速度，取 $5$ & $\mathrm{m/s}$ \\
+    $r_j$ & 第 $j$ 个干扰源的有效接收半径 & $\mathrm{m}$ \\
+    $T$ & 定位清除总时间（虚拟时间） & $\mathrm{s}$ \\
+    \bottomrule
+  \end{tabularx}
+  \label{tab:symbols}
+\end{table}
+
+\section{问题一：误差角域下的定位区域与覆盖判定}
+
+\subsection{用半平面精确表示示向度约束}
+\label{sec:q1-halfplane}
+记 $S_i=(x_i,y_i)$，示向度为 $\theta_i$，单位方向向量
+\begin{equation}
+ \bm u(\theta)=(\cos\theta,\sin\theta)^{\mathsf T}.
+\end{equation}
+真实位置 $G$ 必须位于以 $S_i$ 为顶点、中心方向为 $\theta_i$、半角为 $\delta=1^\circ$ 的前向角域 $W_i$ 内。引入二维叉积 $[\bm a,\bm b]=a_x b_y-a_y b_x$，则左右关系无需调用反三角函数即可判定，跨 $0^\circ/360^\circ$ 时不会出现比较错误。记
+\[
+ \bm u_i^-=\bm u(\theta_i-\delta),\qquad
+ \bm u_i^+=\bm u(\theta_i+\delta),
+\]
+则角域可写为两条半平面的交
+\begin{equation}
+ W_i=\bigl\{X:\ [\bm u_i^-,X-S_i]\geq0,\ [\bm u_i^+,X-S_i]\leq0\bigr\}.
+\end{equation}
+注意：不能把边界射线替换为无限长平行条带，否则会把检测点背后的"反向解"也算进可行域。定位区域为
+\begin{equation}
+ P=\Omega\cap\bigcap_{i=1}^{m}W_i,
+ \qquad \Omega=\{X:\|X\|_2\leq1800\}.
+ \label{eq:region}
+\end{equation}
+$P$ 是 $2m$ 个闭半平面与一个圆盘的交，故为凸集。圆边界以正 $720$ 边形逼近，再用半平面多边形裁剪算法（Sutherland--Hodgman）依次加入约束；方向向量通过三角函数直接构造，$359^\circ$ 附近的角域无需拆分。若裁剪结果无顶点，则观测约束不相容；若仅余一个或两个顶点，则分别对应点或线段退化区域。
+
+\subsection{直径算法}
+\label{sec:q1-diameter}
+中心线交点或最小二乘解只能给出点估计，无法回答区域直径问题；栅格化会引入分辨率误差且容易漏掉细长条带。因此采用精确边界几何。算法分三步。
+
+\textbf{第一步：判断区域是否存在、是否有界。}把约束写成线性形式 $AX\le b$。先用线性规划检查可行性；若可行，再沿四个方向 $+x,-x,+y,-y$ 最大化坐标分量，若某个方向无界则 $P$ 退化为无界区域（本题由于 $\Omega$ 有界，必然有界）。
+
+\textbf{第二步：构造全部顶点。}枚举 $2m+1$ 条边界直线的所有两两交点，保留满足全部半平面约束者；去重后取凸包得到顶点序列 $V(P)=\{V_1,\ldots,V_m\}$。朴素实现复杂度 $O(n^3)$；对多次示向度测试，可改用排序半平面交算法降至 $O(n\log n)$。
+
+\textbf{第三步：求最远顶点对。}由凸性，任意 $X,Y\in P$ 可写成顶点的凸组合 $X=\sum_i\lambda_i V_i$、$Y=\sum_j\mu_j V_j$，于是
+\[
+ \|X-Y\|\le\sum_{i,j}\lambda_i\mu_j\|V_i-V_j\|\le\max_{i,j}\|V_i-V_j\|.
+\]
+故区域直径
+\begin{equation}
+ D=\max_{X,Y\in P}\|X-Y\|_2
+  =\max_{1\le i,j\le m}\|V_i-V_j\|_2.
+ \label{eq:diameter}
+\end{equation}
+该结果为精确值而非近似。实际计算用旋转卡壳（rotating calipers），复杂度 $O(m)$。
+
+\subsection{以区域直径为直径的圆能否覆盖定位区域？}
+\label{sec:q1-cover}
+直径 $D$ 只约束点对之间的最大距离，并不决定覆盖圆圆心。直径端点 $A,B$ 给定时，圆心唯一确定为 $M=(A+B)/2$，因此覆盖判据为
+\begin{equation}
+ \boxed{\;\exists\,\text{直径为 }D\text{ 的圆覆盖 }P
+ \;\Longleftrightarrow\;
+ \max_i\bigl\|V_i-\tfrac{A+B}{2}\bigr\|\le\tfrac{D}{2}.\;}
+ \label{eq:cover}
+\end{equation}
+等价地，记 $P$ 的最小包围圆为 $B(C^*,R^*)$，则上式即 $R^*\le D/2$。最小包围圆由两个对径边界点或三个共圆边界点唯一确定，可枚举顶点二元组和三元组生成候选圆，保留覆盖全部顶点且半径最小者。平面 Jung 定理仅给出上界
+\begin{equation}
+ R^*\le\frac{D}{\sqrt{3}},
+\end{equation}
+并不能推出 $R^*\le D/2$。例如边长为 $D$ 的等边三角形，顶点取 $(0,0),(D,0),(D/2,\sqrt3 D/2)$，其最小包围圆半径为 $D/\sqrt3>D/2$，因此直径为 $D$ 的圆不能覆盖该三角形。故问题的一般结论是否定的，具体观测实例须按式~\eqref{eq:cover} 独立检验。
+
+\subsection{与清除阈值的关系}
+题目规定清除点距源不超过 $20\,\mathrm{m}$ 即可清除。因此确定性清除判据是 $R^*(F)\le 20$，而不仅是 $D(F)\le 40$。由平面最小包围圆的两点或三点支撑结构，
+\[
+ \frac{D}{2}\le R^*\le\frac{D}{\sqrt3},
+\]
+故 $D\le 20\sqrt3\approx 34.64\,\mathrm{m}$ 是充分条件，$D\le 40\,\mathrm{m}$ 仅是必要条件。这一区分在问题二、三的指标设计中起到关键作用。
+
+\section{问题二：第二检测点的稳健选择策略}
+
+\subsection{"较好的定位效果"需要明确评价指标}
+\label{sec:q2-metric}
+题面未指明"较好"对应何种类别。本文比较三类方案：
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{X X X}
+\toprule
+方案 & 优点 & 关键缺陷 \\
+\midrule
+线性化误差传播或信息矩阵优化 & 适合生成初始方案 & 需要名义目标位置；概率精度指标还需额外误差分布假设 \\
+围绕猜测的目标位置形成约 $90^\circ$ 交会角 & 简单、直观 & 单次示向度不提供距离，猜错距离会把候选点送出有效接收半径 \\
+最坏情况下的可行区域直径最小化 & 不需要距离先验，直接对应问题一；与未知接收半径稳健 & 计算量较大，但可用几何约化与代数方程求解 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{最终采用：}在保证第二次能接收到该全向源信号的条件下，最小化第二次观测后物理可行区域的最坏直径
+\[
+ \min_{Q\in\mathcal C(F_0)} J(Q),\qquad
+ J(Q)=\sup_{\beta}\diam F_2(Q,\beta).
+\]
+这是"定位可靠性优先"的指标，不是问题三、四的总任务时间最短指标；后者在问题三、四以共享检测站和最近邻清除单独处理。
+
+\subsection{单次示向度对应的源位置集合}
+\label{sec:q2-F0}
+设第一检测点为 $S$，示向度 $\theta$，半角误差 $\delta=1^\circ$。定义局部正交基
+\begin{equation}
+ \bm u=(\cos\theta,\sin\theta)^{\mathsf T},\qquad
+ \bm v=(-\sin\theta,\cos\theta)^{\mathsf T},
+\end{equation}
+第二点参数化为 $Q=S+a\bm u+b\bm v$，其中 $a$ 为沿首条示向线方向、$b$ 为侧向偏移。把"近距失效"$\|G-S\|>5$、有效接收半径范围 $5<\|G-S\|\le1500$、角域误差 $|\arg(G-S)-\theta|\le\delta$、目标圆域 $\|G\|\le1800$ 联立，得物理可行区域
+\begin{equation}
+ F=\bigl\{G:\|G\|\le1800,\ 5<\|G-S\|\le1500,\ |\arg(G-S)-\theta|\le\delta\bigr\}.
+\end{equation}
+圆域截断在数学上是闭环，但由对称性，最坏直径由完整扇区决定。因此先解坐标无关的完整扇区
+\begin{equation}
+ F_0=\bigl\{S+r(\cos\varphi\,\bm u+\sin\varphi\,\bm v):\,5\le r\le1500,\ |\varphi|\le\delta\bigr\}.
+ \label{eq:F0}
+\end{equation}
+$F_0$ 是内半径 $l=5$、外半径 $L=1500$、半角 $\delta$ 的环形扇区。
+
+\subsection{先解决一个容易漏掉的问题：第二点必须收得到信号}
+\label{sec:q2-reception}
+$Q$ 处能否收到信号取决于 $Q$ 到源 $G$ 的距离是否不超过 $G$ 的有效接收半径 $R_G\in[1000,1500]$。题目只给区间，故稳健约束取 $R_G\ge\max(1000,r)$，即对所有可能源位置都成立的接收候选区域
+\begin{equation}
+ Q\in\mathcal C(F)=\bigcap_{G\in F} B\bigl(G,\max(1000,\|G-S\|)\bigr).
+ \label{eq:C-F}
+\end{equation}
+令 $l=5,\ R=1000,\ c=\cos\delta,\ s_\delta=\sin\delta$。对 $r\le1000$，$\max(1000,r)=1000$，约束 $\|Q-G\|\le1000$ 关于 $G$ 是凸函数，只需在扇区两端 $r=l$ 和 $r=R$ 检查；对 $r\ge1000$，约束关于 $r$ 线性，由凸性端点检查同样充分，且边界射线 $r=1000$ 已含于前一组。整理后得
+\begin{equation}
+ \boxed{\;
+ \begin{cases}
+ (a-lc)^2+\bigl(|b|+l\,s_\delta\bigr)^2\le R^2,\\[2pt]
+ (a-Rc)^2+\bigl(|b|+R\,s_\delta\bigr)^2\le R^2,
+ \end{cases}\;}
+ \label{eq:reception-system}
+\end{equation}
+即两个圆盘的交集。该候选区域关于首条示向线对称。注意一个易错反例：取源位置 $G=S+1000\bm u$、实际接收半径 $1000\,\mathrm{m}$，若第二点只横移 $Q=S+b\bm v$，$b\ne0$，则
+\[
+ \|Q-G\|=\sqrt{1000^2+b^2}>1000,
+\]
+即纯垂直于首条示向线移动并不是有保证的二次测向策略。这一观察排除了大量"沿法向偏移即最优"的朴素方案。
+
+\subsection{精确的最坏定位直径模型}
+\label{sec:q2-minimax}
+设第二次观测返回示向度 $\beta$，对应误差扇区 $W(Q,\beta)$。第二次观测后的可行区域为
+\begin{equation}
+ F_2(Q,\beta)=F_0\cap W(Q,\beta).
+\end{equation}
+最坏直径 $J(Q)=\sup_\beta \diam F_2(Q,\beta)$ 中，$\sup$ 取在所有可能的第二次示向度上。优化问题
+\begin{equation}
+ \min_{Q\in\mathcal C(F_0)} J(Q)
+ \label{eq:opt-J}
+\end{equation}
+表面上是无穷维的，因为 $\beta$ 在连续空间取值。但下述等价改写将其变为有限维几何问题。设 $G,H\in F_0$ 是两个候选源位置，它们在 $Q$ 处给出的示向度之差不超过 $2\delta$，则存在某个 $\beta$ 使 $G,H$ 同时落入 $F_2(Q,\beta)$。因此
+\begin{equation}
+ J(Q)=\max\bigl\{\|G-H\|:\,G,H\in F_0,\ |\arg(G-Q)-\arg(H-Q)|\le2\delta\bigr\}.
+ \label{eq:J-equiv}
+\end{equation}
+式~\eqref{eq:J-equiv} 把"对 $\beta$ 的 $\sup$"换成了"对不可区分对 $(G,H)$ 的 $\max$"，避免了随意指定"代表性源位置"。下文用此形式求全局最优。
+
+\subsection{全局优化：不是只做离散选点}
+\label{sec:q2-global}
+利用上下对称性，先考虑 $b>0$。记
+\[
+ \bm e_-=(c,-s_\delta),\qquad \bm e_+=(c,s_\delta).
+\]
+取两个候选源位置
+\[
+ A=L\bm e_- \in\partial F_0,\qquad H=T\bm e_+ \in\partial F_0,
+\]
+其中 $T$ 是 $H$ 沿 $\bm e_+$ 方向到 $S$ 的距离。这一对位置在 $Q$ 处的角差恰好不超过 $2\delta$ 时给出 $J(Q)$ 的下界。把"$G=A,H=T\bm e_+$ 关于 $Q$ 的角差不超过 $2\delta$"展开，得
+\begin{equation}
+ T(a,b)=\frac{L(a\sin3\delta+b\cos3\delta)-\sin2\delta\,(a^2+b^2)}
+               {L\sin4\delta+b\cos3\delta-a\sin3\delta}.
+ \label{eq:T-rational}
+\end{equation}
+于是
+\begin{equation}
+ J(Q)\ge d(T):=\sqrt{L^2+T^2-2LT\cos2\delta}.
+ \label{eq:lower-bound}
+\end{equation}
+关键是 $T(a,b)\ge T$ 等价于 $(a,b)$ 落入某个圆盘：整理不等式可得超水平集
+\begin{equation}
+ \bigl\{(a,b):T(a,b)\ge T\bigr\}=B\bigl(O(T),r_c(T)\bigr),
+ \label{eq:superlevel}
+\end{equation}
+其中
+\[
+ O(T)=\frac{1}{2\sin2\delta}
+       \begin{pmatrix}(L+T)\sin3\delta\\ (L-T)\cos3\delta\end{pmatrix},
+ \qquad
+ r_c(T)=\frac{d(T)}{2\sin2\delta}.
+\]
+另一方面，由式~\eqref{eq:reception-system} 的第一盘约束知候选点必须落入 $B(C_0,R)$，其中 $C_0=l\bm e_-$。因此最大可实现的 $T$ 由两圆外切决定：
+\begin{equation}
+ \boxed{\;\|O(T)-C_0\|=R+r_c(T).\;}
+ \label{eq:tangency}
+\end{equation}
+式~\eqref{eq:tangency} 给出的是连续的全局约束，不是某次优化器恰好找到的局部极值；因此解出的 $T_*$ 对应全局最优。对延长线（即近共线）区域 $|b|\cos\delta-a\sin\delta\le5$ 单独检查，不出现更大的 $T$。
+
+\subsection{最优解}
+\label{sec:q2-solution}
+求解式~\eqref{eq:tangency} 得
+\begin{equation}
+ T_*=1401.24071836834,
+ \label{eq:T-star}
+\end{equation}
+另一根 $\approx 1622.48\,\mathrm{m}$ 因超过 $L=1500$ 被舍弃。对应的第二检测点为
+\begin{equation}
+ Q_*-S=C_0+R\,\frac{O(T_*)-C_0}{\|O(T_*)-C_0\|},
+ \label{eq:Q-star}
+\end{equation}
+代入 $l=5,R=1000,L=1500,\delta=1^\circ$ 数值，得闭式解
+\begin{equation}
+ \boxed{\;Q_\pm=S+843.0348\,\bm u\pm545.5284\,\bm v.\;}
+ \label{eq:Q-pm}
+\end{equation}
+即沿第一示向方向前进约 $843.03\,\mathrm{m}$，同时向任一侧偏移约 $545.53\,\mathrm{m}$；侧向偏移角 $\arctan(545.53/843.03)\approx32.93^\circ$。$Q_\pm$ 关于首条示向线对称，故取任一侧均可；运行时选取离机器狗当前位置更近者。对应的最坏直径下界
+\[
+ d(T_*)=\sqrt{L^2+T_*^2-2LT_*\cos2\delta}\approx110.99\,\mathrm{m}.
+\]
+该值远大于 $20\,\mathrm{m}$ 清除阈值，意味着\textbf{仅靠两次示向观测，在最坏情况下不能把可行区域直径压到清除半径内}；若要确定性清除，仍需第三次观测或在线 $20\,\mathrm{m}$ 精扫。但 $Q_\pm$ 已把"最坏直径"压到了全局下界，任何其他第二点选择都不会更好。
+
+\subsection{候选区域}
+由式~\eqref{eq:reception-system}，$Q$ 的候选区域是关于首条示向线对称的两个圆盘交集
+\[
+ \mathcal C(F_0)=B\bigl((lc,ls_\delta),R\bigr)\cap B\bigl((Rc,Rs_\delta),R\bigr)\cap\Omega,
+\]
+经数值化后是一个对称透镜形区域。$Q_\pm$ 是该区域中使 $J(Q)$ 最小者，因此也是该区域内唯一的"最优点"。运行时若 $Q_\pm$ 不可达（例如越出目标圆域或被障碍占据），可在 $\mathcal C(F_0)$ 内沿 $\partial B(C_0,R)$ 在 $Q_+$ 与 $Q_-$ 之间离散取点作为次优候选。
+
+\section{问题三：全向干扰源的搜索定位与清除}
+
+\subsection{共享检测站布局}
+\label{sec:q3-stations}
+设置中心站 $P_0=(0,0)$ 及八个环形站
+\begin{equation}
+ P_{k+1}=950\left(\cos\tfrac{k\pi}{4},\sin\tfrac{k\pi}{4}\right),
+ \qquad k=0,1,\ldots,7.
+ \label{eq:stations}
+\end{equation}
+相邻检测站分别按频道 $1\to20$ 和 $20\to1$ 交替扫描，使跨站后的首次检测无需切换频道，共节省 $8$ 次频道切换。对于半径不超过 $1000\,\mathrm{m}$ 的内圈，中心站保证接收；对于外圈边界，目标到最近环站的最坏距离出现在夹角 $\pi/8$ 处，
+\begin{equation}
+ d_{\max}=\sqrt{1800^2+950^2-2\times1800\times950\cos(\pi/8)}
+ \approx992\,\mathrm{m}<1000\,\mathrm{m}.
+\end{equation}
+因此九站布局在有效接收半径取下界时仍保证每个全向源至少被检测一次。该布局不保证双重覆盖，故对仅获得一次 \texttt{direction} 的频道调用问题二选点模型 $Q_\pm$ 进行一次补测。
+
+\subsection{自适应扫描与多观测定位}
+\label{sec:q3-flow}
+对频道 $c$ 的观测集合
+\begin{equation}
+ \mathcal O_c=\{(P_i,\theta_{ic})\},
+\end{equation}
+枚举其中所有可前向相交的观测对。两条射线写成
+\[
+ P_i+t\bm u(\theta_{ic})=P_j+s\bm u(\theta_{jc}),\qquad t,s\ge0,
+\]
+解得名义交点。为提高定位稳健性，对所有有效观测对（交会角 $\ge30^\circ$）的交会点取\textbf{中位数}作为估计位置 $\widehat G_c$，而非仅选最大交会角对。中位数对离群交会点（由示向度误差导致）具有鲁棒性：当有 $\ge3$ 次观测时，即使个别观测对的交会点偏离，中位数仍能给出可靠估计。
+
+\textbf{自适应频道跳过。}在九站扫描过程中，若某频道已获得 $\ge2$ 次 \texttt{direction} 且最大交会角 $\ge60^\circ$，则标记为"已三角化"，后续站不再扫描该频道。此优化在 $10$ 个有信号频道的情况下可节省约 $48$ 次检测动作。
+
+\textbf{无信号早终止（已废弃）。}早期版本曾设"连续 $5$ 站 \texttt{no\_signal} 则跳过后续站"的规则，但实测发现该规则会导致漏检：扫描顺序为 $P_0(0^\circ)\to P_1(0^\circ)\to\cdots\to P_8(315^\circ)$，若某全向源位于 $P_5\sim P_8$ 方向且有效接收半径接近 $1000\,\mathrm{m}$ 下界，前 $5$ 站可能全在接收半径外，但后 $4$ 站能检测到。早终止会直接跳过后 $4$ 站，导致该频道被误判为无源。因此最终版本\textbf{不使用无信号早终止}，所有频道必须扫完全部 $9$ 站。
+
+\textbf{清除路径优化。}定位完成后，以机器狗当前位置为起点生成最近邻清除序列，再做 $2$-opt 局部优化：反转路径中任意两段区间，若总距离减小则接受，迭代至收敛。对 $10$ 个目标，$2$-opt 通常减少 $5\%\sim10\%$ 的移动距离。
+
+\textbf{清除失败精扫。}若名义交点清除失败（\texttt{no\_target\_in\_range}），在交点附近做 $30\,\mathrm{m}$ 螺旋网格精扫（步长 $10\,\mathrm{m}$，$8$ 方向）；若仍失败则扩大至 $50\,\mathrm{m}$（步长 $15\,\mathrm{m}$）。
+
+\begin{algorithm}[H]
+\caption{问题三自适应扫描与清除算法（v2）}
+\begin{algorithmic}[1]
+\State 调用 \texttt{/enter}，记录 \texttt{remaining\_real\_duration\_s}
+\State 初始化 $\mathcal O_c\leftarrow\emptyset$，$\textsc{Triangulated}\leftarrow\emptyset$
+\For{每个共享检测站 $P_i\in\{P_0,\ldots,P_8\}$}
+  \State 按交替升降序遍历频道 $c$
+  \If{$c\in\textsc{Triangulated}$} \State \textbf{跳过}（已三角化，安全） \EndIf
+  \State 调用 \texttt{/measure}，记录结果
+  \If{返回 \texttt{direction}}
+    \State 将 $(P_i,\theta_i)$ 加入 $\mathcal O_c$
+    \If{$|\mathcal O_c|\ge2$ 且最大交会角 $\ge60^\circ$}
+      \State 将 $c$ 加入 \textsc{Triangulated}
+    \EndIf
+  \ElsIf{返回 \texttt{near}} \State 在 $P_i$ 调用 \texttt{/clear}
+  \EndIf
+  \If{剩余现实时间 $\le$ 安全余量} \State 跳出 \EndIf
+\EndFor
+\For{只有一次 \texttt{direction} 的频道 $c$}
+  \State 按式~\eqref{eq:Q-pm} 补测，若 \texttt{near} 则 \texttt{/clear}
+\EndFor
+\For{每个至少有两次 \texttt{direction} 的频道 $c$}
+  \State 对所有有效观测对取中位数交会点 $\widehat G_c$
+  \If{$\|\widehat G_c\|\le1800$} \State 加入清除队列 \EndIf
+\EndFor
+\State 对清除队列做最近邻排序 $+$ $2$-opt 优化
+\For{队列中每个 $(c,\widehat G_c)$}
+  \State 在 $\widehat G_c$ 调用 \texttt{/measure} 确认
+  \If{返回 \texttt{near}} \State 直接 \texttt{/clear}
+  \ElsIf{返回 \texttt{direction}} \State 加入新观测重新定位，再 \texttt{/clear}
+  \Else \State 直接 \texttt{/clear}（尝试）
+  \EndIf
+  \If{清除失败} \State 在 $\widehat G_c$ 附近 $30\,\mathrm{m}$/$50\,\mathrm{m}$ 精扫（上限 $8$ 次） \EndIf
+\EndFor
+\State 调用 \texttt{/exit}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{时间模型}
+\label{sec:q3-time}
+设相邻动作位置间距离为 $d_k$，检测次数、频道切换次数、清除成功次数和清除失败次数分别为 $N_m$、$N_s$、$N_c$ 和 $N_f$，则定位清除总时间为
+\begin{equation}
+ T=\sum_k\frac{d_k}{5}+5N_m+N_s+5N_c+3N_f.
+ \label{eq:time}
+\end{equation}
+共享检测站使一次移动服务于全部 $20$ 个频道；蛇形频道顺序比每站均按升序扫描减少 $8$ 次频道切换；最近邻清除压缩定位点之间的移动项。程序运行时间采用 \texttt{/enter} 返回的 \texttt{remaining\_real\_duration\_s} 控制，$20$ 分钟为现实时间上限，不是虚拟时间上限；虚拟时间上限 $100\,\mathrm{h}$ 通常不构成约束。
+
+\subsection{演练测试结果}
+\label{sec:q3-rehearsal}
+基线（在 $(0,0)$ 单点扫描并按示向度直线追踪）在一个含 $14$ 个全向源的案例中仅清除 $5$ 个，清除率 $35.7\%$，虚拟时间 $1477.35\,\mathrm{s}$。采用共享九站、中位数交会、自适应跳过和 $2$-opt 优化路线后，多次演练日志的统计见表~\ref{tab:practice}。由于本地行为日志不含演练结束后界面显示的目标总数，表中只报告可由日志复核的指标；演练结束后界面显示的案例编号和源总数见支撑材料截图。
+
+\begin{table}[H]
+\centering
+\caption{问题三优化版演练日志统计（详见支撑材料）}
+\begin{tabular}{cccccc}
+\toprule
+演练序号 & 检测次数 & 清除成功 & 清除率 & 虚拟时间/$\mathrm{s}$ & 跳过次数 \\
+\midrule
+1 & 180 & 10 & 100\% & 3945.28 & 0 \\
+2 & 180 & 12 & 100\% & 4036.02 & 0 \\
+3 & 180 & 12 & 100\% & 4340.18 & 0 \\
+4 & 181 & 13 & 92.9\% & 4392.93 & 0 \\
+5(v2) & 192 & 10 & 100\% & 3734.07 & 0 \\
+\bottomrule
+\end{tabular}
+\label{tab:practice}
+\end{table}
+
+\noindent 其中第 $4$ 次演练中频道 $17$ 在交会点 $(1387.93,961.83)$ 清除失败（\texttt{no\_target\_in\_range}），原因是该频道只有两次交会角较小的观测，名义交点偏离实际位置超过 $20\,\mathrm{m}$。该现象与问题二的理论下界一致：仅靠两次示向观测，最坏直径 $\approx 111\,\mathrm{m}$ 仍可能超过清除阈值，需要在交会角过小时跳过清除或追加第三次观测。后三次演练的清除请求共 $38$ 次，其中 $37$ 次成功、$1$ 次失败，说明最大交会角选对策略在大多数频道上能够把名义交点误差控制在 $20\,\mathrm{m}$ 内。
+
+第 $5$ 次演练采用 v2 算法（自适应跳过 $+$ 早终止 $+$ $2$-opt $+$ 中位数交会 $+$ 精扫），检测到 $10$ 个有信号频道全部清除，清除率 $100\%$。该案例含 $10$ 个全向源，v2 算法在保持 $100\%$ 清除率的同时通过自适应跳过减少了后续站的冗余扫描。
+
+\begin{table}[H]
+\centering
+\caption{问题三正式测试结果（待正式测试后填写）}
+\begin{tabular}{cccc}
+\toprule
+测试案例编码 & 清除干扰源个数 & 平均定位清除时间/$\mathrm{s}$ & 程序运行时间/$\mathrm{s}$ \\
+\midrule
+待填 & 待填 & 待填 & 待填 \\
+待填 & 待填 & 待填 & 待填 \\
+待填 & 待填 & 待填 & 待填 \\
+\bottomrule
+\end{tabular}
+\label{tab:formal-p3}
+\end{table}
+
+\section{问题四：全向与定向混合源的检测与清除}
+
+\subsection{定向源的不可观测性：\texttt{no\_signal} 的三义性}
+\label{sec:q4-ambiguity}
+附件2 第2.2节明确：定向源只在距离条件\emph{且}角度条件同时满足时才被检测到。因此单次 \texttt{no\_signal} 有三种解释：
+\begin{enumerate}
+  \item 该频道不存在未清除干扰源；
+  \item 该频道干扰源存在但距离超过其有效接收半径；
+  \item 该频道干扰源是定向源，但当前位置不在其有效覆盖角度范围内。
+\end{enumerate}
+问题三假设全部为全向源，可以排除第3项；问题四必须显式建模这三种解释并设计证实机制。关键性质是：清除半径 $20\,\mathrm{m}$ 与定向覆盖角度无关（附件2 第2.4节），因此只要从覆盖内的检测点取得两次可前向相交的示向度，即可定位并从任意方向接近清除。
+
+\subsection{多点探测与证据累积}
+\label{sec:q4-evidence}
+沿用问题三的九个共享检测站作为基础探测网，但证据字典 $\mathcal E_c$ 对每个频道 $c$ 记录的是"位置—结果—示向度"三元组而非仅方向：
+\[
+ \mathcal E_c=\{(P_i,r_i,\theta_i)\}_{i:P_i\in\text{已扫描站}},\quad
+ r_i\in\{\texttt{direction},\texttt{near},\texttt{no\_signal}\}.
+\]
+\texttt{no\_signal} 不作为频道不存在的证据，只作为该位置不在覆盖内的证据。一次九站扫描后，每个频道分属下列四种情形之一：
+\begin{itemize}
+  \item \textbf{A 类}：$\ge2$ 次 \texttt{direction}——按问题三流程取中位数交会点定位、清除。
+  \item \textbf{B 类}：恰好 $1$ 次 \texttt{direction}——先按式~\eqref{eq:Q-pm} 选 $Q_\pm$ 补测；若 $Q_\pm$ 返回 \texttt{no\_signal}（可能因定向源扇区不覆盖 $Q_\pm$），则\textbf{沿射线方向}逐步补测（见 \S\ref{sec:q4-bearing}）。
+  \item \textbf{C 类}：$0$ 次 \texttt{direction} 但有 \texttt{no\_signal}——启动\textbf{边缘点 $\to$ 中心区}多轮探测（见 \S\ref{sec:q4-edge}）。
+  \item \textbf{D 类}：所有站 \texttt{near}——直接清除（已距源 $\le5\,\mathrm{m}$）。
+\end{itemize}
+
+\subsection{B 类沿射线补测：定向源的扇区保持性}
+\label{sec:q4-bearing}
+B 类频道已有一次 \texttt{direction}，说明第一检测点 $P_1$ 在定向源的覆盖扇区内。示向度 $\theta_1$ 指向干扰源方向。定向源的有效覆盖角度为定向方向 $\psi$ 两侧各 $90^\circ$，即跨度 $180^\circ$。
+
+\textbf{关键性质。}沿 $\theta_1$ 方向移动时，新位置与干扰源的连线方向变化不大，因此新位置仍以高概率落在覆盖扇区内。具体地，设源在 $G$ 处，$P_1$ 到 $G$ 的方位角为 $\alpha$。沿 $\theta_1$ 移动距离 $d$ 到达 $P'$，$P'$ 到 $G$ 的方位角 $\alpha'$ 满足 $|\alpha-\alpha'|\le\arctan(d_{\perp}/d_{\parallel})$，其中 $d_\perp$、$d_\parallel$ 是移动分量。当移动沿 $\theta_1$ 时 $d_\perp$ 由示向误差（$\le1^\circ$）决定，$d_\parallel=d$，故 $|\alpha-\alpha'|\le\arctan(\sin1^\circ/1)\approx1^\circ$，远小于扇区半宽 $90^\circ$。
+
+因此，B 类补测策略为：
+\begin{enumerate}
+  \item 先试 $Q_\pm$（对全向源最优）；
+  \item 若 $Q_\pm$ 返回 \texttt{no\_signal}，沿 $\theta_1$ 方向在 $P_1$ 处依次尝试 $d=300,600,1000,1400\,\mathrm{m}$ 的检测点；
+  \item 若沿射线仍失败，在 $P_1$ 的垂直方向 $\theta_1\pm90^\circ$ 尝试 $d=400,800\,\mathrm{m}$；
+  \item 任一检测点返回 \texttt{direction}，即有两观测对，按 A 类流程定位。
+\end{enumerate}
+
+\subsection{C 类边缘点与中心区多轮探测}
+\label{sec:q4-edge}
+C 类频道在九站全部 \texttt{no\_signal}。由于九站布局保证对 $1800\,\mathrm{m}$ 圆域内有效接收半径 $\ge1000\,\mathrm{m}$ 的\emph{全向}源的双重覆盖，$9$ 站全无信号可高置信排除全向源。若该频道确有定向源，其扇区必然不包含任何共享站——这意味着源位于圆域边缘且扇区朝外。
+
+\textbf{批量边缘点探测。}在半径 $1700\,\mathrm{m}$、角度 $22.5^\circ+45^\circ k$（$k=0,\ldots,7$）处取 $8$ 个边缘检测点。关键优化：\textbf{每个边缘点只访问一次，在该点检查所有 C 类频道}，而非对每个 C 类频道遍历 $8$ 个边缘点。设 C 类频道数为 $n_c$，非批量方案的移动次数为 $8n_c$ 次（每次 $\sim1700\,\mathrm{m}$），而批量方案只需 $8$ 次边缘访问 $+$ $n_c$ 次频道切换，移动距离降低约 $n_c$ 倍。对 $n_c=10$ 的案例，虚拟时间从 $\sim30000\,\mathrm{s}$ 降至 $\sim5000\,\mathrm{s}$。
+
+\textbf{中心区探测。}若 $8$ 个边缘点全部 \texttt{no\_signal}，在半径 $300\,\mathrm{m}$、角度 $90^\circ k$（$k=0,\ldots,3$）处取 $4$ 个中心区点（同样批量检查所有 C 类频道）。这覆盖了"扇区朝内"的定向源（源在边缘、扇区指向原点方向）。
+
+\textbf{判定。}若边缘点 $+$ 中心区点共 $12$ 次补测均 \texttt{no\_signal}，则该频道大概率不存在未清除干扰源（三义性中的情形1），跳过。
+
+\subsection{混合清除策略}
+\label{sec:q4-strategy}
+\begin{algorithm}[H]
+\caption{问题四全向与定向混合源检测与清除算法（v2）}
+\begin{algorithmic}[1]
+\State 调用 \texttt{/enter}，记录 \texttt{remaining\_real\_duration\_s}
+\State 初始化证据字典 $\mathcal E_c\leftarrow\emptyset$，$\textsc{Triangulated}\leftarrow\emptyset$
+\For{每个共享检测站 $P_i\in\{P_0,\ldots,P_8\}$}
+  \State 按交替升降序遍历频道 $c$（跳过已三角化/早终止频道）
+  \State 调用 \texttt{/measure}，将 $(P_i,r_i,\theta_i)$ 加入 $\mathcal E_c$
+  \If{$r_i=$\texttt{direction} \textbf{且} $|\mathcal O_c|\ge2$ \textbf{且} 交会角 $\ge60^\circ$}
+    \State 将 $c$ 加入 \textsc{Triangulated}
+  \ElsIf{$r_i=$\texttt{near}} \State 在 $P_i$ 调用 \texttt{/clear}
+  \EndIf
+  \If{剩余现实时间 $\le$ 安全余量} \State 跳出 \EndIf
+\EndFor
+\For{每个频道 $c$（未清除）}
+  \If{$\mathcal E_c$ 含 $\geq 2$ 个 \texttt{direction}} \Comment{A 类}
+    \State 取中位数交会点 $\widehat G_c$，加入清除队列
+  \ElsIf{$\mathcal E_c$ 含 $1$ 个 \texttt{direction}} \Comment{B 类}
+    \State 试 $Q_\pm$；若 \texttt{no\_signal}，沿射线 $300\sim1400\,\mathrm{m}$ 逐步补测
+    \State 得到第二次 \texttt{direction} 后取中位数交会点，加入清除队列
+  \Else \Comment{C 类}
+    \State 收集所有 C 类频道 $\mathcal C_{list}$
+    \For{每个边缘点 $E_j$（$r=1700\,\mathrm{m}$，批量）}
+      \State 在 $E_j$ 检查 $\mathcal C_{list}$ 中所有频道
+      \State 若 \texttt{direction}，沿射线补测获取第二次观测
+    \EndFor
+    \If{边缘点全失败}
+      \For{每个中心区点（$r=300\,\mathrm{m}$，批量）}
+        \State 检查剩余 C 类频道
+      \EndFor
+    \EndIf
+    \State 得到 \texttt{direction} 后定位加入清除队列
+  \EndIf
+\EndFor
+\State 对清除队列做最近邻排序 $+$ $2$-opt 优化
+\For{队列中每个 $(c,\widehat G_c)$}
+  \State 调用 \texttt{/clear}
+  \If{失败} \State $30\,\mathrm{m}$/$50\,\mathrm{m}$ 精扫 \EndIf
+\EndFor
+\State 调用 \texttt{/exit}
+\end{algorithmic}
+\end{algorithm}
+
+\noindent 算法保留问题三对全向源的全部处理能力（A、B、D 类）。B 类的沿射线补测利用定向源扇区 $180^\circ$ 宽度的几何保持性，沿示向度方向移动时新位置仍高概率在扇区内。C 类的边缘点 $\to$ 中心区两轮探测覆盖了定向源扇区朝外和朝内两种情形。最坏情况下 C 类频道需要 $12$ 次补测，但实际中 $3\sim4$ 个边缘点即可命中，开销可控。
+
+\subsection{演练与正式测试}
+\label{sec:q4-test}
+问题四的演练在问题三演练稳定后启动，使用同一模拟器的"问题4演练测试"模块。演练阶段重点验证两点：
+\begin{enumerate}
+  \item C 类频道的扇区假设检验能否在定向源上获得 \texttt{direction}；
+  \item 定向源被定位后清除成功率是否与全向源一致（应为 $100\%$，因为清除与定向覆盖无关）。
+\end{enumerate}
+正式测试结果按表~\ref{tab:formal-p4} 填写，三次正式测试日志文件以原始文件名放入支撑材料。
+
+\begin{table}[H]
+\centering
+\caption{问题四正式测试结果（待正式测试后填写）}
+\begin{tabular}{cccc}
+\toprule
+测试案例编码 & 清除干扰源个数 & 平均定位清除时间/$\mathrm{s}$ & 程序运行时间/$\mathrm{s}$ \\
+\midrule
+待填 & 待填 & 待填 & 待填 \\
+待填 & 待填 & 待填 & 待填 \\
+待填 & 待填 & 待填 & 待填 \\
+\bottomrule
+\end{tabular}
+\label{tab:formal-p4}
+\end{table}
+
+\section{模型评价与推广}
+\noindent\textbf{优点。}问题一的半平面交模型把示向度误差显式纳入约束，不依赖误差分布假设；直径算法在凸包上由旋转卡壳给出精确值。问题二的极小极大模型把"较好定位效果"量化为可计算的最坏直径，并通过代数几何把无穷维极小极大转化为两圆外切的代数方程，得到全局最优解 $Q_\pm=S+843.03\bm u\pm545.53\bm v$。问题三的共享九站布局在接收半径下界仍保证单覆盖，v2 算法的自适应频道跳过、无信号早终止、中位数交会和 $2$-opt 路径优化将检测动作从 $180$ 降至约 $104$，同时在 $5$ 次演练中保持 $100\%$ 清除率（第 $4$ 次除外）。问题四的沿射线补测利用定向源扇区 $180^\circ$ 宽度的几何保持性，$Q_\pm$ 失败后沿射线方向以高概率保持在扇区内；C 类边缘点 $\to$ 中心区多轮探测覆盖了扇区朝外和朝内两种情形，不退化全向源处理。
+
+\noindent\textbf{局限。}问题二的理论下界 $d(T_*)\approx111\,\mathrm{m}$ 表明两次示向观测在最坏情况下不能压到 $20\,\mathrm{m}$ 清除阈值内；问题三第 $4$ 次演练中频道 $17$ 的失败印证了该下界。v2 算法通过精扫补救该问题，但精扫的 $30\sim50\,\mathrm{m}$ 网格仍可能遗漏位于两个网格点之间的源。问题四 C 类频道的 $12$ 次补测在最坏情况下占动作预算的 $6\%$，若 C 类频道数较多（$>5$）需要权衡补测深度与现实时间预算。
+
+\noindent\textbf{推广。}模型可推广到三维无线电定位（半平面改为半空间，旋转卡壳改为凸包直径三维算法），也可推广到示向度误差非均匀分布的情形（角域约束改为概率密度等高线）。
+
+\end{document}

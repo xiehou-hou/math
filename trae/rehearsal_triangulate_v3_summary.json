@@ -1,0 +1,18 @@
+{
+  "cleared": 3,
+  "channels_with_signal": [
+    3,
+    5,
+    12,
+    13,
+    18
+  ],
+  "channels_cleared": [
+    3,
+    5,
+    12
+  ],
+  "actions": 61,
+  "virtual_time_s": 1742.645397,
+  "errors": []
+}
